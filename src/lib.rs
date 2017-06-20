@@ -7,7 +7,7 @@ mod flowd{
 		let mut version = [0u8; 1];
 		reader.read(&mut version).expect("reading version marker");
 		if version[0] as char != '2' {
-			//TODO return error
+			Some(Error::new(ErrorKind::Other, "version marker is not '2'"));
 		}
 		// frame type
 		// NOTE: read_line() strangely returns trailing \n, lines() not
@@ -25,7 +25,6 @@ mod flowd{
         Ok(line) => line,
         Err(e) => return Err(e)
     	};
-			//TODOlet line = line.expect("reading header line");
 			if line.len() == 0 {
 				// got empty line; done with header
 				break;
@@ -34,7 +33,7 @@ mod flowd{
 			let splitted = line.splitn(2, ':');
 			let line_parts: Vec<&str> = splitted.collect();
 			if line_parts.len() != 2 {
-				//TODO return error
+				Some(Error::new(ErrorKind::Other, "header line contains no colon"));
 			}
 			// act accordingly
 			if line_parts[0] == "port" {
@@ -45,7 +44,6 @@ mod flowd{
 				body_length = line_parts[1].parse().expect("parsing body length");
 			} else {
 				// add to headers
-				//println!("{} has value {}", line_parts[0], line_parts[1]);
 				header.push(Header(line_parts[0].to_owned(), line_parts[1].to_owned()));
 			}
 		}
@@ -56,7 +54,7 @@ mod flowd{
 		let mut terminator = [0u8; 1];
 		reader.read(&mut terminator).expect("reading frame terminator");
 		if terminator[0] != 0 {
-			//TODO return error
+			Some(Error::new(ErrorKind::Other, "frame terminator is no null byte"));
 		}
 		return Ok(IP{
 			frame_type: frame_type,
