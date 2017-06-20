@@ -1,0 +1,6 @@
+[package]
+name = "libflowd"
+version = "0.1.0"
+authors = ["Ernst Rohlicek <ernst@rohlicek.at>"]
+
+[dependencies]
