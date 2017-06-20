@@ -1,11 +1,8 @@
 mod flowd{
-	//use std::io::prelude::*;
-	//use std::io;
 	use std::io::Error;
 	use std::io::BufRead;
-	//use std::io::Result;
-	pub fn parse_frame<'a, T>(mut reader: T) -> Result<IP<'a>, Error> where T: BufRead {
-	//pub fn parse_frame<'a, T>(mut reader: T) where T: BufRead {
+	#[allow(dead_code)]
+	pub fn parse_frame<T>(mut reader: T) -> Result<IP, Error> where T: BufRead {
 		// version marker
 		let mut version = [0u8; 1];
 		reader.read(&mut version).expect("reading version marker");
@@ -13,55 +10,47 @@ mod flowd{
 			//TODO return error
 		}
 		// frame type
+		// NOTE: read_line() strangely returns trailing \n, lines() not
 		let mut frame_type = String::new();
-		let bytes_read = reader.read_line(&mut frame_type).expect("reading frame type");
+		let mut bytes_read = reader.read_line(&mut frame_type).expect("reading frame type");
+		bytes_read -= 1;
+		frame_type.truncate(bytes_read);
 		// header
 		let mut header: Vec<Header> = vec![];
-		/*
-		let mut body_type: &'a str = "";
-		let mut port: &'a str = "";
+		let mut body_type: String = String::new();
+		let mut port: String = String::new();
 		let mut body_length: usize = 0;
-		*/
-		let mut line2: String;
 		for line in reader.by_ref().lines() {
-			/*
 			let line = match line {
         Ok(line) => line,
         Err(e) => return Err(e)
     	};
-			*/
-			line2 = line.expect("reading header line");
-			/*
+			//TODOlet line = line.expect("reading header line");
 			if line.len() == 0 {
 				// got empty line; done with header
 				break;
 			}
-			*/
 			// split line
-			//error here: line2 does not live long enough, shall live as long as 'a
-			let splitted = line2.splitn(2, ':');
+			let splitted = line.splitn(2, ':');
 			let line_parts: Vec<&str> = splitted.collect();
-			/*
 			if line_parts.len() != 2 {
 				//TODO return error
 			}
 			// act accordingly
 			if line_parts[0] == "port" {
-				port = line_parts[1];
+				port = line_parts[1].to_owned();
 			} else if line_parts[0] == "type" {
-				body_type = line_parts[1];
+				body_type = line_parts[1].to_owned();
 			} else if line_parts[0] == "length" {
 				body_length = line_parts[1].parse().expect("parsing body length");
 			} else {
-				*/
 				// add to headers
-				println!("{} has value {}", line_parts[0], line_parts[1]);
-				header.push(Header(line_parts[0], line_parts[1]));
-			//}
+				//println!("{} has value {}", line_parts[0], line_parts[1]);
+				header.push(Header(line_parts[0].to_owned(), line_parts[1].to_owned()));
+			}
 		}
 		// body, if length > 0
-		/*
-		let mut body: Vec<u8> = Vec::with_capacity(body_length);
+		let mut body: Vec<u8> = vec![0u8; body_length];	// NOTE: does not work: Vec::with_capacity(body_length);
 		reader.read_exact(&mut body).expect("reading body");
 		// frame terminator byte
 		let mut terminator = [0u8; 1];
@@ -70,35 +59,28 @@ mod flowd{
 			//TODO return error
 		}
 		return Ok(IP{
-			frameType: frame_type,
-			bodyType: body_type,
+			frame_type: frame_type,
+			body_type: body_type,
 			port: port,
 			headers: header,
 			body: body,
 		});
-		*/
-		return Ok(IP{
-			frameType: frame_type,
-			bodyType: "TCPData",
-			port: "IN",
-			headers: header,
-			body: vec![],
-		});
 }
 
 	// tuple
-	pub struct Header<'a>(pub &'a str, pub &'a str);
+	pub struct Header(pub String, pub String);
 
-	pub struct IP<'a> {
-		pub frameType: String,
-		pub bodyType: &'a str,
-		pub port: &'a str,
-		pub headers: Vec<Header<'a>>,
+	pub struct IP {
+		pub frame_type: String,
+		pub body_type: String,
+		pub port: String,
+		pub headers: Vec<Header>,
 		pub body: Vec<u8>,
 	}
 
-	impl<'a> IP<'a> {
-		pub fn marshal(&'a self) {
+	impl IP {
+		#[allow(dead_code)]
+		pub fn marshal(& self) {
 			//TODO
 			println!("IP.marshal!");
 		}
@@ -111,24 +93,28 @@ mod flowd{
 mod tests {
 	use flowd;
 	use std::io;
-	use std::iter::FromIterator;
 
-	fn utf8_to_string(bytes: &[u8]) -> String {
+	fn utf8_bytes_to_string(bytes: &[u8]) -> String {
 		let vector: Vec<u8> = Vec::from(bytes);
+		String::from_utf8(vector).unwrap()
+	}
+
+	fn utf8_vec_to_string(vector: Vec<u8>) -> String {
 		String::from_utf8(vector).unwrap()
 	}
 
 	#[test]
 	fn parse_frame_parses() {
-		let frameStrV2 = format!("2{}\n{}\n{}\n{}\n{}\n\n{}\0", "data", "type:TCPPacket", "port:IN", "conn-id:1", "length:2", "a\n");
-		let cursor = io::Cursor::new(frameStrV2);
-		let ip: flowd::IP = flowd::parse_frame(cursor);
-		assert!(ip.frameType == "data");
-		assert!(ip.bodyType == "TCPPacket");
-		assert!(ip.port == "IN");
-		assert!(ip.headers[0].0 == "conn-id");
-		assert!(ip.headers[0].1 == "1");
-		let bodyStr = utf8_to_string(ip.body);
-		assert!(bodyStr == "a\0");
+		let frame_str_v2 = format!("2{}\n{}\n{}\n{}\n{}\n\n{}\0", "data", "type:TCPPacket", "port:IN", "conn-id:1", "length:2", "a\n");
+		let cursor = io::Cursor::new(frame_str_v2);
+		let ip = flowd::parse_frame(cursor);
+		let ip = ip.expect("unpacking parse result");
+		assert_eq!(ip.frame_type, "data");
+		assert_eq!(ip.body_type, "TCPPacket");
+		assert_eq!(ip.port, "IN");
+		assert_eq!(ip.headers[0].0, "conn-id");
+		assert_eq!(ip.headers[0].1, "1");
+		let body = utf8_vec_to_string(ip.body);
+		assert_eq!(body, "a\n");
 	}
 }
