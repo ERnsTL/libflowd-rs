@@ -1,3 +1,6 @@
+#![feature(test)]
+extern crate test;
+
 mod flowd{
 	use std::io::Error;
 	use std::io::BufRead;
@@ -188,5 +191,38 @@ mod tests {
 		let marshaled_str: String = String::from_utf8(buffer).expect("converting marshaled bytes to utf8 string");
 		let frame_str_v2: String = format!("2{}\n{}\n{}\n{}\n{}\n\n{}\0", "data", "type:TCPPacket", "port:IN", "conn-id:1", "length:2", "a\n");
 		assert_eq!(frame_str_v2, marshaled_str);
+	}
+
+	use test::Bencher;
+
+	#[bench]
+	// NOTE: to check if compiler did optimize actual benchmark work away
+	fn empty(b: &mut Bencher) {
+		b.iter(|| 1)
+	}
+
+	#[bench]
+	fn parse_v2(b: &mut Bencher) {
+		let frame_str_v2: String = format!("2{}\n{}\n{}\n{}\n{}\n\n{}\0", "data", "type:TCPPacket", "port:IN", "conn-id:1", "length:2", "a\n");
+		let mut frame: flowd::IP;
+		b.iter(|| {
+			let cursor = io::Cursor::new(&frame_str_v2);
+			let ip = flowd::parse_frame(cursor);
+		})
+	}
+
+	#[bench]
+	fn marshal_v2(b: &mut Bencher) {
+		let frame = flowd::IP{
+			frame_type: "data".to_owned(),
+			body_type: "TCPPacket".to_owned(),
+			port: "IN".to_owned(),
+			headers: vec![flowd::Header("conn-id".to_owned(), "1".to_owned())],
+			body: b"a\n".to_vec()
+		};
+		b.iter(|| {
+			let mut buffer: Vec<u8> = vec![];
+			frame.marshal(&mut buffer);
+		})
 	}
 }
