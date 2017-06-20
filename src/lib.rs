@@ -78,11 +78,75 @@ mod flowd{
 		pub body: Vec<u8>,
 	}
 
+	use std::io::Write;
+	use std::io::ErrorKind;
 	impl IP {
 		#[allow(dead_code)]
-		pub fn marshal(& self) {
-			//TODO
-			println!("IP.marshal!");
+		//TODO further optimizations using BufWrite @ https://github.com/Kixunil/genio
+		// NOTE: use BufWriter to wrap STDOUT, otherwise 1 syscall per byte written
+		pub fn marshal<T>(& self, mut writer: T) -> Option<Error> where T: Write {
+			// version marker
+			match writer.write(&[b'2']) {
+				Err(e) => return Some(e),
+				_ => ()
+			};
+			// frame type
+			if self.frame_type == "" {
+				return Some(Error::new(ErrorKind::Other, "frame_type emtpy"));
+			}
+			match write!(&mut writer, "{}\n", self.frame_type) {
+				Err(e) => return Some(e),
+				_ => ()
+			};
+			// body type, if present
+			if self.body_type != "" {
+				match write!(&mut writer, "type:{}\n", self.body_type) {
+					Err(e) => return Some(e),
+					_ => ()
+				};
+			}
+			// port, if present
+			if self.port != "" {
+				match write!(&mut writer, "port:{}\n", self.port) {
+					Err(e) => return Some(e),
+					_ => ()
+				};
+			}
+			// other header fields, if present
+			if !self.headers.is_empty() {
+				for header in self.headers.iter() {
+					match write!(&mut writer, "{}:{}\n", header.0, header.1) {
+						Err(e) => return Some(e),
+						_ => ()
+					};
+				}
+			}
+			// is body present?
+			if !self.body.is_empty() {
+				// body length and end-of-header marker = empty line
+				match write!(&mut writer, "length:{}\n\n", self.body.len()) {
+					Err(e) => return Some(e),
+					_ => ()
+				};
+				// body
+				match writer.write(&self.body) {
+					Err(e) => return Some(e),
+					_ => ()
+				};
+			} else {
+				// end-of-header marker
+				match writer.write(&[b'\n']) {
+					Err(e) => return Some(e),
+					_ => ()
+				};
+			}
+			// frame terminator = null byte
+			match writer.write(&[0x00]) {
+				Err(e) => return Some(e),
+				_ => ()
+			};
+			// success
+			None
 		}
 	}
 }
@@ -94,18 +158,9 @@ mod tests {
 	use flowd;
 	use std::io;
 
-	fn utf8_bytes_to_string(bytes: &[u8]) -> String {
-		let vector: Vec<u8> = Vec::from(bytes);
-		String::from_utf8(vector).unwrap()
-	}
-
-	fn utf8_vec_to_string(vector: Vec<u8>) -> String {
-		String::from_utf8(vector).unwrap()
-	}
-
 	#[test]
 	fn parse_frame_parses() {
-		let frame_str_v2 = format!("2{}\n{}\n{}\n{}\n{}\n\n{}\0", "data", "type:TCPPacket", "port:IN", "conn-id:1", "length:2", "a\n");
+		let frame_str_v2: String = format!("2{}\n{}\n{}\n{}\n{}\n\n{}\0", "data", "type:TCPPacket", "port:IN", "conn-id:1", "length:2", "a\n");
 		let cursor = io::Cursor::new(frame_str_v2);
 		let ip = flowd::parse_frame(cursor);
 		let ip = ip.expect("unpacking parse result");
@@ -114,7 +169,26 @@ mod tests {
 		assert_eq!(ip.port, "IN");
 		assert_eq!(ip.headers[0].0, "conn-id");
 		assert_eq!(ip.headers[0].1, "1");
-		let body = utf8_vec_to_string(ip.body);
+		let body = String::from_utf8(ip.body).expect("parsed body to utf8 string");
 		assert_eq!(body, "a\n");
+	}
+
+	#[test]
+	fn marshal_frame_marshals() {
+		let frame = flowd::IP{
+			frame_type: "data".to_owned(),
+			body_type: "TCPPacket".to_owned(),
+			port: "IN".to_owned(),
+			headers: vec![flowd::Header("conn-id".to_owned(), "1".to_owned())],
+			body: b"a\n".to_vec()
+		};
+		let mut buffer: Vec<u8> = vec![];
+		match frame.marshal(&mut buffer) {
+			Some(e) => panic!(e),
+			_ => ()
+		};
+		let marshaled_str: String = String::from_utf8(buffer).expect("converting marshaled bytes to utf8 string");
+		let frame_str_v2: String = format!("2{}\n{}\n{}\n{}\n{}\n\n{}\0", "data", "type:TCPPacket", "port:IN", "conn-id:1", "length:2", "a\n");
+		assert_eq!(frame_str_v2, marshaled_str);
 	}
 }
