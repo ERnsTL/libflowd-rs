@@ -1,9 +1,144 @@
+#![feature(bufreader_buffer)]
 #![feature(test)]
 extern crate test;
 
 mod flowd {
-	use std::io::BufRead;
-	use std::io::Error;
+	//use std::io::prelude::*;
+	use std::io::{BufRead, BufReader, Error, Read};
+	use std::marker::PhantomData;
+	use std::str;
+
+	pub struct Parser<'a, T: 'a> {
+		reader: BufReader<T>,
+		buf: &'a [u8],
+		err: Option<Error>,
+		phantom: PhantomData<&'a T>,
+	}
+
+	impl<'a, T: Read> Parser<'a, T> {
+		//pub fn new<T: BufReader<u8> + Read + BufRead>(mut reader: T) -> Parser {
+		pub fn new(stream: T) -> Parser<'a, T> {
+			Parser {
+				reader: BufReader::<T>::new(stream),
+				buf: &[1, 1], //TODO
+				err: None,
+				phantom: PhantomData,
+			}
+		}
+	}
+
+	const NEWLINE: u8 = 0x0a;
+
+	impl<'a, T: Read> Iterator for Parser<'a, T> {
+		type Item = IP2<'a>;
+
+		// NOTE: Iterator wants Option; thus returning error information via Parser.err
+		fn next(&mut self) -> Option<IP2<'a>> {
+			/*
+			FIXME this would provide the maximum speed-up, but unfortunately there is no transitive
+			ownership concept in Rust. The BufReader is owned by Parser, but reader.buffer() only returns
+			a borrow into its internal buffer. Access to that would allow references into it
+			= without allocations. But that is not possible -> Nom parser using Rust generator.
+			*/
+			//self.reader.fill_buf();
+			self.buf = self.reader.buffer();
+			//let mut version_marker: [u8; 1] = [0u8; 1];
+			//self.reader.read_exact(&mut version_marker).unwrap();
+
+			// version marker
+			if self.buf[0] != VERSION_TWO {
+				self.err = Some(Error::new(ErrorKind::Other, "version marker is not '2'"));
+				return None;
+			}
+
+			// frame type
+			let frame_type_end: usize;
+			let mut i: usize = 0;
+			loop {
+				if self.buf[i] == NEWLINE {
+					frame_type_end = i - 1;
+					break;
+				} else {
+					i += 1;
+				}
+			}
+			//let sl = std::slice::from_raw_parts(&buf[1], frame_type_end - 1);
+			//let frame_type: &str = std::str::from_utf8(sl).unwrap();
+			let frame_type: &str = str::from_utf8(&self.buf[1..frame_type_end - 1]).unwrap();
+
+			/*
+			// header
+			let mut header: Vec<Header> = vec![];
+			let mut body_type: String = String::new();
+			let mut port: String = String::new();
+			let mut body_length: usize = 0;
+			for line in self.reader.lines() {
+				let line = match line {
+					Ok(line) => line,
+					Err(e) => {
+						self.err = Some(e);
+						return None;
+					}
+				};
+				if line.len() == 0 {
+					// got empty line; done with header
+					break;
+				}
+				// split line
+				let line_parts: Vec<&str> = line.splitn(2, ':').collect();
+				if line_parts.len() != 2 {
+					Some(Error::new(
+						ErrorKind::Other,
+						"header line contains no colon",
+					));
+				}
+				// act accordingly
+				if line_parts[0] == "port" {
+					port = line_parts[1].to_string();
+				} else if line_parts[0] == "type" {
+					body_type = line_parts[1].to_string();
+				} else if line_parts[0] == "length" {
+					body_length = line_parts[1].parse().expect("parsing body length");
+				} else {
+					// add to headers
+					header.push(Header(line_parts[0].to_string(), line_parts[1].to_string()));
+				}
+			}
+			// body, if length > 0
+			let mut body: Vec<u8> = Vec::with_capacity(body_length);
+			self.reader.read_exact(&mut body).expect("reading body");
+			// frame terminator byte
+			let mut terminator = [0u8; 1];
+			self.reader
+				.read(&mut terminator)
+				.expect("reading frame terminator");
+			if terminator[0] != 0 {
+				self.err = Some(Error::new(
+					ErrorKind::Other,
+					"frame terminator is no null byte",
+				));
+				return None;
+			}
+			*/
+
+			//None
+			Some(IP2 {
+				frame_type: frame_type,
+				body_type: frame_type,
+				port: frame_type,
+				headers: vec![("test".to_string(), "test".to_string())],
+				body: &[8],
+			})
+		}
+	}
+
+	pub struct IP2<'b> {
+		pub frame_type: &'b str,
+		pub body_type: &'b str,
+		pub port: &'b str,
+		pub headers: Vec<(String, String)>,
+		pub body: &'b [u8],
+	}
 
 	const VERSION_TWO: u8 = 0x32; // "2"
 	#[allow(dead_code)]
@@ -170,6 +305,12 @@ mod flowd {
 }
 
 //TODO Implement using nom parser
+//TODO problem: Nom is not a streaming parser, but has some support around it:
+// https://github.com/Geal/generator_nom
+// https://stackoverflow.com/questions/46876879/how-do-i-create-a-streaming-parser-in-nom
+
+//TODO turn into FrameParser, which can consume the BufReader -> feed itself, then hand out references to parsed frames.
+// ^ possible without using a parser library.
 
 #[cfg(test)]
 mod tests {
