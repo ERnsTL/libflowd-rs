@@ -14,7 +14,7 @@ Parse and marshal [libflowd v2 frames](https://github.com/ERnsTL/flowd), enablin
 
 ## Insights Regarding the Nom Parser
 
-Nom - like most parsers - is not a streaming parser. It does not keep state, does not automatically refill its buffer.
+Nom - like most parsers - is not a streaming parser. It does not keep state, does not automatically refill its buffer. But with some supporting structure around the parser, it is possible to use it for stream parsing.
 
 * [example how to use the support around it to make it streaming](https://github.com/Geal/generator_nom)
 * [another example](https://stackoverflow.com/questions/46876879/how-do-i-create-a-streaming-parser-in-nom)
