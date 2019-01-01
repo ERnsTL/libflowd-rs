@@ -434,75 +434,117 @@ pub mod flowd {
 
 	const VERSION_TWO: u8 = 0x32; // "2"
 
-	#[allow(dead_code)]
+	//TODO move into a Parser struct as internal variables
+	static mut version: [u8; 1] = [0u8; 1];
+	static mut terminator: [u8; 1] = [0u8; 1];
+
+	//#[allow(dead_code)]
 	pub fn parse_frame<T>(reader: &mut T) -> Result<IP, Error>
 	where
 		T: BufRead,
 	{
 		// version marker
-		let mut version = [0u8; 1]; //TODO optimize could re-use
-		reader.read(&mut version).expect("reading version marker");
-		if version[0] != VERSION_TWO {
-			Some(Error::new(ErrorKind::Other, "version marker is not '2'"));
+		//let mut version = [0u8; 1]; //TODO optimize could re-use
+		unsafe {
+			reader.read(&mut version).expect("reading version marker");
+			if version[0] != VERSION_TWO {
+				Some(Error::new(ErrorKind::Other, "version marker is not '2'"));
+			}
 		}
 		// frame type
 		// NOTE: read_line() strangely returns trailing \n, lines() not
-		let mut frame_type = String::with_capacity(4);
+		//   see https://github.com/rust-lang/rust/issues/23636
+		// NOTE: avoid allocation just for truncating the trailing \n
+		let mut frame_type: String = unsafe { std::mem::uninitialized() };
+		/*
+		let mut frame_type = String::with_capacity(4); // data + \n
 		let bytes_read = reader
 			.read_line(&mut frame_type)
 			.expect("reading frame type");
 		frame_type.truncate(bytes_read - 1);
+		*/
 		//frame_type.truncate(bytes_read);
 		// header
 		let mut header: Vec<Header> = vec![];
-		let mut body_type: String = String::new();
-		let mut port: String = String::new();
+		let mut body_type: String = unsafe { std::mem::uninitialized() };
+		let mut port: String = unsafe { std::mem::uninitialized() };
 		let mut body_length: usize = 0;
+		let mut first: bool = true;
+		//let mut linetmp: String;
 		for line in reader.lines() {
+			//let mut line: String = String::new();
+			//while reader.read_line(&mut line).unwrap() > 0 {
+			//let line = line?;
 			let line = line?;
-			if line.is_empty() {
-				// got empty line; done with header
-				break;
+			{
+				//line = line.trim_end().to_string();
+				if first {
+					// it is the rest of the frame type line
+					unsafe { std::ptr::write(&mut frame_type, String::from_str(&line).unwrap()) };
+					first = false;
+					//line.clear();
+					continue;
+				}
+				if line.is_empty() {
+					// got empty line; done with header
+					break;
+				}
+				// split line
+				let line_parts: Vec<&str> = line.splitn(2, ':').collect();
+				/*
+				if line_parts.len() != 2 {
+					return Err(Error::new(
+						ErrorKind::InvalidInput,
+						"header line contains no colon",
+					));
+				}
+				*/
+				// act accordingly
+				match line_parts[0] {
+					"port" => {
+						//port = line_parts[1].to_string();
+						unsafe {
+							std::ptr::write(&mut port, String::from_str(&line_parts[1]).unwrap())
+						};
+					}
+					"type" => {
+						//body_type = line_parts[1].to_string();
+						unsafe {
+							std::ptr::write(
+								&mut body_type,
+								String::from_str(&line_parts[1]).unwrap(),
+							)
+						};
+					}
+					"length" => {
+						// TODO optimize
+						body_length = usize::from_str(&line_parts[1]).expect("parsing body length");
+					}
+					_ => {
+						// add to headers
+						header.push(Header(line_parts[0].to_string(), line_parts[1].to_string()));
+					}
+				}
 			}
-			// split line
-			let line_parts: Vec<&str> = line.splitn(2, ':').collect();
-			if line_parts.len() != 2 {
-				return Err(Error::new(
-					ErrorKind::InvalidInput,
-					"header line contains no colon",
-				));
-			}
-			// act accordingly
-			match line_parts[0] {
-				"port" => {
-					port = line_parts[1].to_string();
-				}
-				"type" => {
-					body_type = line_parts[1].to_string();
-				}
-				"length" => {
-					// TODO optimize
-					body_length = usize::from_str(&line_parts[1]).expect("parsing body length");
-				}
-				_ => {
-					// add to headers
-					header.push(Header(line_parts[0].to_string(), line_parts[1].to_string()));
-				}
-			}
+			//line.clear();
 		}
 		// body, if length > 0
-		let mut body: Vec<u8> = vec![0u8; body_length]; // NOTE: does not work: Vec::with_capacity(body_length);
+		//let mut body: Vec<u8> = Vec::with_capacity(body_length);
+		//body.resize(body_length, 0);
+		let mut body: Vec<u8> = vec![0u8; body_length];
 		reader.read_exact(&mut body).expect("reading body");
 		// frame terminator byte
-		let mut terminator = [0u8; 1]; //TODO optimize this could be reused
-		reader
-			.read(&mut terminator)
-			.expect("reading frame terminator");
-		if terminator[0] != 0u8 {
-			Some(Error::new(
-				ErrorKind::InvalidData,
-				"frame terminator is no null byte",
-			));
+		//let mut terminator = [0u8; 1]; //TODO optimize this could be reused
+		unsafe {
+			reader
+				.read_exact(&mut terminator)
+				.expect("reading frame terminator");
+			if terminator[0] != 0u8 {
+				Some(Error::new(
+					ErrorKind::InvalidData,
+					"frame terminator is no null byte",
+				));
+			}
 		}
 		return Ok(IP {
 			frame_type: frame_type,
