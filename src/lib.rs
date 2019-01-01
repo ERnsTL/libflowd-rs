@@ -594,11 +594,12 @@ mod flowd {
 			}
 			// is body present?
 			if !self.body.is_empty() {
-				// body length and end-of-header marker = empty line
+				// body length
 				writer.write(LENGTH).expect("writing length field name");
 				writer
 					.write(self.body.len().to_string().as_bytes())
 					.expect("writing body length value");
+				writer.write(NEWLINE)?;
 				/*
 				match write!(&mut writer, "length:{}\n\n", self.body.len()) {
 					Err(e) => return Some(e),
@@ -607,10 +608,9 @@ mod flowd {
 				*/
 				// body
 				writer.write(&self.body)?;
-			} else {
-				// end-of-header marker
-				writer.write(NEWLINE)?;
 			}
+			// end-of-header marker
+			writer.write(NEWLINE)?;
 			// frame terminator = null byte
 			writer.write(NULL_BYTE)?;
 			// success
