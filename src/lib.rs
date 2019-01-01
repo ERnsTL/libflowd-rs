@@ -429,19 +429,19 @@ mod flowd {
 		T: BufRead,
 	{
 		// version marker
-		let mut version = [0u8; 1];
+		let mut version = [0u8; 1]; //TODO optimize could re-use
 		reader.read(&mut version).expect("reading version marker");
 		if version[0] != VERSION_TWO {
 			Some(Error::new(ErrorKind::Other, "version marker is not '2'"));
 		}
 		// frame type
 		// NOTE: read_line() strangely returns trailing \n, lines() not
-		let mut frame_type = String::new();
-		let mut bytes_read = reader
+		let mut frame_type = String::with_capacity(4);
+		let bytes_read = reader
 			.read_line(&mut frame_type)
 			.expect("reading frame type");
-		bytes_read -= 1;
-		frame_type.truncate(bytes_read);
+		frame_type.truncate(bytes_read - 1);
+		//frame_type.truncate(bytes_read);
 		// header
 		let mut header: Vec<Header> = vec![];
 		let mut body_type: String = String::new();
@@ -465,16 +465,21 @@ mod flowd {
 				));
 			}
 			// act accordingly
-			if line_parts[0] == "port" {
-				port = line_parts[1].to_string();
-			} else if line_parts[0] == "type" {
-				body_type = line_parts[1].to_string();
-			} else if line_parts[0] == "length" {
-				// TODO optimize
-				body_length = usize::from_str(&line_parts[1]).expect("parsing body length");
-			} else {
-				// add to headers
-				header.push(Header(line_parts[0].to_string(), line_parts[1].to_string()));
+			match line_parts[0] {
+				"port" => {
+					port = line_parts[1].to_string();
+				}
+				"type" => {
+					body_type = line_parts[1].to_string();
+				}
+				"length" => {
+					// TODO optimize
+					body_length = usize::from_str(&line_parts[1]).expect("parsing body length");
+				}
+				_ => {
+					// add to headers
+					header.push(Header(line_parts[0].to_string(), line_parts[1].to_string()));
+				}
 			}
 		}
 		// body, if length > 0
@@ -485,7 +490,7 @@ mod flowd {
 		reader
 			.read(&mut terminator)
 			.expect("reading frame terminator");
-		if terminator[0] != 0 {
+		if terminator[0] != 0u8 {
 			Some(Error::new(
 				ErrorKind::InvalidData,
 				"frame terminator is no null byte",
@@ -606,11 +611,14 @@ mod flowd {
 					_ => (),
 				};
 				*/
+				// end-of-header marker
+				writer.write(NEWLINE)?;
 				// body
 				writer.write(&self.body)?;
+			} else {
+				// end-of-header marker
+				writer.write(NEWLINE)?;
 			}
-			// end-of-header marker
-			writer.write(NEWLINE)?;
 			// frame terminator = null byte
 			writer.write(NULL_BYTE)?;
 			// success
