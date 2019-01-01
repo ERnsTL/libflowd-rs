@@ -708,9 +708,10 @@ mod tests {
 			headers: vec![flowd::Header("conn-id".to_owned(), "1".to_owned())],
 			body: b"a\n".to_vec(),
 		};
+		let mut buffer: Vec<u8> = vec![];
 		b.iter(|| {
-			let mut buffer: Vec<u8> = vec![];
-			frame.marshal(&mut buffer);
-		})
+			buffer.clear();
+			frame.marshal(&mut buffer).unwrap();
+		});
 	}
 }
