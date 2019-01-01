@@ -677,14 +677,6 @@ pub mod flowd {
 	}
 }
 
-//TODO Implement using nom parser
-//TODO problem: Nom is not a streaming parser, but has some support around it:
-// https://github.com/Geal/generator_nom
-// https://stackoverflow.com/questions/46876879/how-do-i-create-a-streaming-parser-in-nom
-
-//TODO turn into FrameParser, which can consume the BufReader -> feed itself, then hand out references to parsed frames.
-// ^ possible without using a parser library.
-
 #[cfg(test)]
 mod tests {
 	use flowd;
