@@ -4,3 +4,5 @@ version = "0.1.0"
 authors = ["Ernst Rohlicek <ernst@rohlicek.at>"]
 
 [dependencies]
+nom = "^4.1"
+circular = { git = "https://github.com/sozu-proxy/circular" }

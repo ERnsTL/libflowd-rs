@@ -1,136 +1,32 @@
-#![feature(bufreader_buffer)]
+#![feature(generators, generator_trait)]
 #![feature(test)]
 extern crate test;
 
+#[macro_use]
+extern crate nom;
+//extern crate flavors;
+extern crate circular;
+
 mod flowd {
-	//use std::io::prelude::*;
-	use std::io::{BufRead, BufReader, Error, Read};
-	use std::marker::PhantomData;
+	use std::io::{BufRead, Error, Read};
+	use std::result::*;
 	use std::str;
 
-	pub struct Parser<'a, T: 'a> {
-		reader: BufReader<T>,
-		buf: &'a [u8],
-		err: Option<Error>,
-		phantom: PhantomData<&'a T>,
-	}
+	use std::fs::File;
+	use std::ops::{Generator, GeneratorState};
 
-	impl<'a, T: Read> Parser<'a, T> {
-		//pub fn new<T: BufReader<u8> + Read + BufRead>(mut reader: T) -> Parser {
-		pub fn new(stream: T) -> Parser<'a, T> {
-			Parser {
-				reader: BufReader::<T>::new(stream),
-				buf: &[1, 1], //TODO
-				err: None,
-				phantom: PhantomData,
-			}
-		}
-	}
+	//use flavors::parser::header;
+	use circular::Buffer;
+	use nom::types::{CompleteByteSlice, CompleteStr};
+	use nom::{alphanumeric, anychar, char, line_ending, newline};
+	use nom::{
+		AsBytes, AsChar, Err, FindToken, HexDisplay, InputLength, InputTakeAtPosition, Needed,
+		Offset,
+	};
 
-	const NEWLINE: u8 = 0x0a;
+	//mod types;
 
-	impl<'a, T: Read> Iterator for Parser<'a, T> {
-		type Item = IP2<'a>;
-
-		// NOTE: Iterator wants Option; thus returning error information via Parser.err
-		fn next(&mut self) -> Option<IP2<'a>> {
-			/*
-			FIXME this would provide the maximum speed-up, but unfortunately there is no transitive
-			ownership concept in Rust. The BufReader is owned by Parser, but reader.buffer() only returns
-			a borrow into its internal buffer. Access to that would allow references into it
-			= without allocations. But that is not possible -> Nom parser using Rust generator.
-			*/
-			//self.reader.fill_buf();
-			self.buf = self.reader.buffer();
-			//let mut version_marker: [u8; 1] = [0u8; 1];
-			//self.reader.read_exact(&mut version_marker).unwrap();
-
-			// version marker
-			if self.buf[0] != VERSION_TWO {
-				self.err = Some(Error::new(ErrorKind::Other, "version marker is not '2'"));
-				return None;
-			}
-
-			// frame type
-			let frame_type_end: usize;
-			let mut i: usize = 0;
-			loop {
-				if self.buf[i] == NEWLINE {
-					frame_type_end = i - 1;
-					break;
-				} else {
-					i += 1;
-				}
-			}
-			//let sl = std::slice::from_raw_parts(&buf[1], frame_type_end - 1);
-			//let frame_type: &str = std::str::from_utf8(sl).unwrap();
-			let frame_type: &str = str::from_utf8(&self.buf[1..frame_type_end - 1]).unwrap();
-
-			/*
-			// header
-			let mut header: Vec<Header> = vec![];
-			let mut body_type: String = String::new();
-			let mut port: String = String::new();
-			let mut body_length: usize = 0;
-			for line in self.reader.lines() {
-				let line = match line {
-					Ok(line) => line,
-					Err(e) => {
-						self.err = Some(e);
-						return None;
-					}
-				};
-				if line.len() == 0 {
-					// got empty line; done with header
-					break;
-				}
-				// split line
-				let line_parts: Vec<&str> = line.splitn(2, ':').collect();
-				if line_parts.len() != 2 {
-					Some(Error::new(
-						ErrorKind::Other,
-						"header line contains no colon",
-					));
-				}
-				// act accordingly
-				if line_parts[0] == "port" {
-					port = line_parts[1].to_string();
-				} else if line_parts[0] == "type" {
-					body_type = line_parts[1].to_string();
-				} else if line_parts[0] == "length" {
-					body_length = line_parts[1].parse().expect("parsing body length");
-				} else {
-					// add to headers
-					header.push(Header(line_parts[0].to_string(), line_parts[1].to_string()));
-				}
-			}
-			// body, if length > 0
-			let mut body: Vec<u8> = Vec::with_capacity(body_length);
-			self.reader.read_exact(&mut body).expect("reading body");
-			// frame terminator byte
-			let mut terminator = [0u8; 1];
-			self.reader
-				.read(&mut terminator)
-				.expect("reading frame terminator");
-			if terminator[0] != 0 {
-				self.err = Some(Error::new(
-					ErrorKind::Other,
-					"frame terminator is no null byte",
-				));
-				return None;
-			}
-			*/
-
-			//None
-			Some(IP2 {
-				frame_type: frame_type,
-				body_type: frame_type,
-				port: frame_type,
-				headers: vec![("test".to_string(), "test".to_string())],
-				body: &[8],
-			})
-		}
-	}
+	//use types::*;
 
 	pub struct IP2<'b> {
 		pub frame_type: &'b str,
@@ -139,6 +35,328 @@ mod flowd {
 		pub headers: Vec<(String, String)>,
 		pub body: &'b [u8],
 	}
+
+	pub struct Parser {
+		capacity: usize,
+		buf: Buffer,
+	}
+
+	impl Parser {
+		//pub fn new<T: BufReader<u8> + Read + BufRead>(mut reader: T) -> Parser {
+		//pub fn new<T: Read>(filename: &str) -> Parser {
+		//pub fn new(filename: &str) -> Parser {
+		pub fn new() -> Parser {
+			// circular::Buffer is a ring buffer abstraction that separates reading and consuming data
+			// it can grow its internal buffer and move data around if we reached the end of that buffer
+			const capacity: usize = 1000;
+			let b = Buffer::with_capacity(capacity);
+
+			Parser {
+				capacity: capacity,
+				buf: b,
+			}
+		}
+
+		//impl<'a, T: Read> Iterator for Parser<'a, T> {
+		// NOTE: ^ is difficult because of half-baked Dynamically Sized Types (DST) support (2018-12)
+		pub fn run(self: &mut Parser, filename: &str) -> std::io::Result<()> {
+			let mut file = File::open(filename)?;
+
+			// we write into the `&mut[u8]` returned by `space()`
+			let sz = file.read(self.buf.space()).expect("should write");
+			self.buf.fill(sz);
+			println!("write {:#?}", sz);
+
+			/*
+			let length = {
+				// `available_data()` returns how many bytes can be read from the buffer
+				// `data()` returns a `&[u8]` of the current data
+				// `to_hex(_)` is a helper method of `nom::HexDisplay` to print a hexdump of a byte slice
+				println!(
+					"data({} bytes):\n{}",
+					self.buf.available_data(),
+					(&self.buf.data()[..min(self.buf.available_data(), 128)]).to_hex(16)
+				);
+
+				// we parse the beginning of the file with `flavors::parser::header`
+				// a FLV file is made of a header, then a serie of tags, suffixed by a 4 byte integer (size of previous tag)
+				// the file header is also followed by a 4 byte integer size
+				let res = header(self.buf.data());
+				if let IResult::Done(remaining, h) = res {
+					println!("parsed header: {:#?}", h);
+
+					// `offset()` is a helper method of `nom::Offset` that can compare two slices and indicate
+					// how far they are from each other. The parameter of `offset()` must be a subset of the
+					// original slice
+					self.buf.data().offset(remaining)
+				} else {
+					panic!("couldn't parse header");
+				}
+			};
+
+			// 4 more bytes for the size of previous tag just after the header
+			println!("consumed {} bytes", length + 4);
+			self.buf.consume(length + 4);
+			*/
+
+			let mut generator = move || {
+				println!("entered generator");
+				// we will count the number of tag and use that and return value for the generator
+				let mut tag_count = 0usize;
+				//let mut consumed = length;
+				let mut consumed = 0;
+
+				println!("entering reading loop");
+				// this is the data reading loop. On each iteration we will read more data, then try to parse
+				// it in the inner loop
+				loop {
+					// refill the buffer
+					let sz = file.read(self.buf.space()).expect("should write");
+					self.buf.fill(sz);
+					println!(
+						"refill: {} more bytes, available data: {} bytes, consumed: {} bytes",
+						sz,
+						self.buf.available_data(),
+						consumed
+					);
+
+					// if there's no more available data in the buffer after a write, that means we reached
+					// the end of the file
+					if self.buf.available_data() == 0 {
+						println!("no more data to read or parse, stopping the reading loop");
+						break;
+					}
+
+					let needed: Option<Needed>;
+
+					// this is the parsing loop. After we read some data, we will try to parse from it until
+					// we get an error or the parser returns `Incomplete`, indicating it needs more data
+					println!("entering parsing loop");
+					loop {
+						let (length, tag) = {
+							//println!("[{}] data({} bytes, consumed {}):\n{}", tag_count,
+							//  b.available_data(), consumed, (&b.data()[..min(b.available_data(), 128)]).to_hex(16));
+
+							/*
+							let bla = frame_header(self.buf.data());
+							let remaining = 0;
+
+							(self.buf.data().offset(remaining), bla)
+							*/
+
+							// try to parse a tag
+							// the `types::flv_tag` parser combines the tag parsing and consuming the 4 byte integer size
+							// following it
+							match frame_header(self.buf.data()) {
+								Ok((remaining, tag)) => {
+									tag_count += 1;
+
+									// tags parsed with flavors contain a slice of the original data. We cannot
+									// return that from the generator, since it is borrowed from the Buffer's internal
+									// data. Instead, we use the `types::Tag` defined in `src/types.rs` to clone
+									// the data
+
+									//let t = Tag::new(tag);
+									//(self.buf.data().offset(remaining), t)
+									//TODO
+
+									//(self.buf.data().offset(remaining), tag)
+									(
+										self.buf.data().offset(remaining),
+										//([97u8, 98u8, 99u8], [65u8, 66u8, 67u8]),
+										(tag.0.to_owned(), tag.1.to_owned()),
+									)
+								}
+								Err(nom::Err::Incomplete(n)) => {
+									println!("not enough data, needs a refill: {:?}", n);
+
+									needed = Some(n);
+									break;
+								}
+								Err(nom::Err::Error(e)) | Err(Err::Failure(e)) => {
+									panic!("parse error: {:#?}", e);
+								}
+							}
+						};
+
+						println!("{}", tag.1[0]);
+
+						println!(
+							"consuming {} of {} bytes",
+							length,
+							self.buf.available_data()
+						);
+						self.buf.consume(length);
+						consumed += length;
+
+						// give the tag to the calling code. On the next call to the generator's `resume()`,
+						// we will continue from the parsing loop, and go on the reading loop's next iteration
+						// if necessary
+						yield tag;
+					}
+
+					// if the parser returned `Incomplete`, and it needs more data than the buffer can hold,
+					// we grow the buffer. In a more realistic code, you would define a maximal size to which
+					// the buffer can grow, instead of letting the input data drive your programm into OOM death
+					if let Some(Needed::Size(sz)) = needed {
+						if sz > self.buf.capacity() {
+							println!(
+								"growing buffer capacity from {} bytes to {} bytes",
+								self.capacity,
+								self.capacity * 2
+							);
+
+							self.capacity *= 2;
+							self.buf.grow(self.capacity);
+						}
+					}
+				}
+
+				// we finished looping over the data, return how many tag we parsed
+				return tag_count;
+			};
+
+			loop {
+				unsafe {
+					match generator.resume() {
+						GeneratorState::Yielded(tag) => {
+							/*
+							println!(
+								"next tag: type={:?}, timestamp={}, size={}",
+								tag.header.tag_type, tag.header.timestamp, tag.header.data_size
+							);
+							*/
+							println!(
+								"gor parser result: {} = {}",
+								tag.0.to_hex(16),
+								tag.1.to_hex(16)
+							);
+						}
+						GeneratorState::Complete(tag_count) => {
+							println!("parsed {} FLV tags", tag_count);
+							break;
+						}
+					}
+				}
+			}
+
+			Ok(())
+		}
+	}
+
+	/*
+		named!(header<Header>,
+	  do_parse!(
+				 take_until(line_ending) >>	//newline
+		version: be_u8       >>
+		flags:   be_u8       >>
+		offset:  be_u32      >>
+		(Header {
+			version: version,
+			audio:   flags & 4 == 4,
+			video:   flags & 1 == 1,
+			offset:  offset
+		})
+	  )
+	);
+	*/
+
+	named!(pub frame_header<(&[u8],&[u8])>,
+		terminated!(header_line, newline)
+		//do_parse!(header_line)
+	);
+
+	/*
+	named!(
+		header_line<(&[u8], &[u8])>,
+		do_parse!(
+				k: take_until1!(is_colon) >>
+				char!(':') >>
+				v: take_until1!(newline) >>
+				(k, v)
+		)
+	);
+	*/
+
+	named!(
+		header_line<(&[u8], &[u8])>,
+		do_parse!(
+			kv: separated_pair!(alphanumeric1_noncolon, char!(':'), alphanumeric1_nonnewline)
+				>> (kv)
+		)
+	);
+
+	/// Recognizes one or more numerical and alphabetic characters.
+	/// For ASCII strings: 0-9a-zA-Z
+	/// For UTF8 strings, 0-9 and any alphabetic code point (ie, not only the ASCII ones)
+	pub fn alphanumeric1_noncolon<T>(input: T) -> nom::IResult<T, T>
+	where
+		T: nom::InputTakeAtPosition,
+		<T as InputTakeAtPosition>::Item: AsChar,
+	{
+		input.split_at_position1(
+			|item| {
+				let c = item.as_char();
+				c == ':'
+			},
+			nom::ErrorKind::AlphaNumeric,
+		)
+	}
+
+	/// Recognizes one or more numerical and alphabetic characters.
+	/// For ASCII strings: 0-9a-zA-Z
+	/// For UTF8 strings, 0-9 and any alphabetic code point (ie, not only the ASCII ones)
+	pub fn alphanumeric1_nonnewline<T>(input: T) -> nom::IResult<T, T>
+	where
+		T: nom::InputTakeAtPosition,
+		<T as InputTakeAtPosition>::Item: AsChar,
+	{
+		input.split_at_position1(
+			|item| {
+				let c = item.as_char();
+				c == '\n'
+			},
+			nom::ErrorKind::Escaped,
+		)
+	}
+
+	//named!(printable<&[u8],&[u8]>, take_while1!(is_ascii_vchar));
+
+	/// True if `ch` is ascii and "visible"/"printable".
+	///
+	/// This is the case for any char in the (decimal)
+	/// range 33..=126 which is '!'..='~'.
+	#[inline(always)]
+	pub fn is_ascii_vchar(ch: char) -> bool {
+		ch > 32 as char && ch <= 126 as char
+	}
+
+	#[inline(always)]
+	pub fn is_ascii_vchar2(ch: u8) -> bool {
+		ch > 32 && ch <= 126
+	}
+
+	#[inline(always)]
+	pub fn is_newline(ch: u8) -> bool {
+		ch == 10
+	}
+
+	#[inline(always)]
+	pub fn is_colon(ch: u8) -> bool {
+		ch == 58
+	}
+
+	#[inline(always)]
+	pub fn is_not_colon(ch: u8) -> bool {
+		ch != 58
+	}
+
+	//TODO convert to &str with the following
+	/*
+	fn complete_byte_slice_to_str<'a>(s: CompleteByteSlice<'a>) -> Result<&'a str, str::Utf8Error> {
+		str::from_utf8(s.0)
+	}
+	*/
 
 	const VERSION_TWO: u8 = 0x32; // "2"
 	#[allow(dead_code)]
@@ -316,6 +534,12 @@ mod flowd {
 mod tests {
 	use flowd;
 	use std::io;
+
+	#[test]
+	fn bla() {
+		let mut p: flowd::Parser = flowd::Parser::new();
+		p.run("/dev/shm/testframe").expect("MASSIVE ERROR");
+	}
 
 	#[test]
 	fn parse_frame_parses() {
