@@ -303,12 +303,12 @@ mod flowd {
 		)
 	);
 
-	const length_bytes: &[u8] = "length".as_bytes();
+	const LENGTH_BYTES: &[u8] = "length".as_bytes();
 
 	//TODO make this function obsolete - extract that length already during a do_parse! block and return it up into the frame_full do_parse! block
 	fn body_get_length(headers: &Vec<(Vec<u8>, Vec<u8>)>) -> usize {
 		for header in headers {
-			if header.0 == length_bytes {
+			if header.0 == LENGTH_BYTES {
 				unsafe {
 					return usize::from_str(str::from_utf8_unchecked(&header.1)).unwrap();
 				}
@@ -632,9 +632,9 @@ mod tests {
 	use std::io;
 
 	#[test]
-	fn bla() {
+	fn nom_parser_parses() {
 		let mut p: flowd::Parser = flowd::Parser::new();
-		p.run("/dev/shm/testframe").expect("MASSIVE ERROR");
+		p.run("./testframe").expect("MASSIVE FAILURE");
 	}
 
 	#[test]
@@ -694,8 +694,17 @@ mod tests {
 			"data", "type:TCPPacket", "port:IN", "conn-id:1", "length:2", "a\n"
 		);
 		b.iter(|| {
-			let cursor = io::Cursor::new(&frame_str_v2);
-			let ip = flowd::parse_frame(cursor).unwrap();
+			cursor.set_position(0);
+			let ip = flowd::parse_frame(&mut cursor).unwrap();
+		})
+	}
+
+	#[bench]
+	//#[allow(unused_variables)]
+	fn parse_v2_nom(b: &mut Bencher) {
+		let mut p: flowd::Parser = flowd::Parser::new();
+		b.iter(|| {
+			p.run("./testframe").expect("MASSIVE FAILURE");
 		})
 	}
 
