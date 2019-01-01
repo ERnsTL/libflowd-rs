@@ -75,3 +75,8 @@ Parsing using Nom (as of 2018-12):
 * [list of Nom parsers](https://github.com/Geal/nom/blob/master/doc/choosing_a_combinator.md)
 * [InputTakeAtPosition trait](https://github.com/Geal/nom/blob/a88a6f8d3fe3cf41ef682bbfec1fd72f08edcf95/src/traits.rs#L499) which is used in many parsers
 * [alphanumeric parser using InputTakeAtPosition as example](https://github.com/Geal/snack/blob/415a689bcdd6b0a3a4d61365237bee9c45dd2f91/src/nom.rs#L186)
+
+
+## License
+
+LGPLv3+
