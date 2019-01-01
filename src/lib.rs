@@ -7,11 +7,11 @@ extern crate nom;
 //extern crate flavors;
 extern crate circular;
 
-mod flowd {
+pub mod flowd {
 	use std::io::{BufRead, Error, ErrorKind, Read};
 	use std::result::*;
 	use std::str;
-	use std::str::FromStr;
+	use std::str::{FromStr, SplitN};
 
 	use std::fs::File;
 	use std::ops::{Generator, GeneratorState};
@@ -423,6 +423,7 @@ mod flowd {
 	*/
 
 	const VERSION_TWO: u8 = 0x32; // "2"
+
 	#[allow(dead_code)]
 	pub fn parse_frame<T>(reader: &mut T) -> Result<IP, Error>
 	where
@@ -447,12 +448,9 @@ mod flowd {
 		let mut body_type: String = String::new();
 		let mut port: String = String::new();
 		let mut body_length: usize = 0;
-		for line in reader.by_ref().lines() {
-			let line = match line {
-				Ok(line) => line,
-				Err(e) => return Err(e),
-			};
-			if line.len() == 0 {
+		for line in reader.lines() {
+			let line = line?;
+			if line.is_empty() {
 				// got empty line; done with header
 				break;
 			}
