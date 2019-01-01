@@ -1,6 +1,8 @@
 #![feature(generators, generator_trait, const_str_as_bytes)]
+#![allow(non_upper_case_globals)]	//TODO until version and terminator are wrappen in struct
 #![feature(test)]
 extern crate test;
+
 
 #[macro_use]
 extern crate nom;
@@ -8,26 +10,21 @@ extern crate nom;
 extern crate circular;
 
 pub mod flowd {
-	use std::io::{BufRead, Error, ErrorKind, Read};
+	use std::io::{BufRead, Error, ErrorKind}; //, Read};
 	use std::result::*;
 	use std::str;
-	use std::str::{FromStr, SplitN};
+	use std::str::FromStr; //SplitN};
 
-	use std::fs::File;
+	//use std::fs::File;
 	use std::ops::{Generator, GeneratorState};
 
 	//use flavors::parser::header;
 	use circular::Buffer;
-	use nom::types::{CompleteByteSlice, CompleteStr};
-	use nom::{alphanumeric, anychar, char, line_ending, newline};
-	use nom::{
-		AsBytes, AsChar, Err, FindSubstring, FindToken, HexDisplay, InputLength,
-		InputTakeAtPosition, Needed, Offset,
-	};
-
-	//mod types;
-
-	//use types::*;
+	//use nom::types::{CompleteByteSlice, CompleteStr};
+	use nom::char;
+	//use nom::{alphanumeric, anychar, char, line_ending, newline};
+	use nom::{AsChar, Err, InputTakeAtPosition, Needed, Offset};
+	//use nom::{AsBytes, FindSubstring, FindToken, HexDisplay, InputLength, InputTakeAtPosition, Needed, Offset, };
 
 	pub struct IP2 {
 		pub frame_type: Vec<u8>,
@@ -49,11 +46,10 @@ pub mod flowd {
 		pub fn new() -> Parser {
 			// circular::Buffer is a ring buffer abstraction that separates reading and consuming data
 			// it can grow its internal buffer and move data around if we reached the end of that buffer
-			const capacity: usize = 1000;
-			let b = Buffer::with_capacity(capacity);
+			let b = Buffer::with_capacity(1000); // starting capacity
 
 			Parser {
-				capacity: capacity,
+				capacity: 1000, // capacity
 				buf: b,
 			}
 		}
@@ -66,7 +62,7 @@ pub mod flowd {
 			// we write into the `&mut[u8]` returned by `space()`
 			let sz = file.read(self.buf.space()).expect("should write");
 			self.buf.fill(sz);
-			println!("write {:#?}", sz);
+			//println!("DEBUG: read {:#?} bytes into buffer", sz);
 
 			/*
 			let length = {
@@ -101,30 +97,34 @@ pub mod flowd {
 			*/
 
 			let mut generator = move || {
-				println!("entered generator");
+				//println!("DEBUG: entered generator");
 				// we will count the number of frames and use that and return value for the generator
-				let mut frame_count = 0usize;
-				//let mut consumed = length;
-				let mut consumed = 0;
+				let mut frame_count: usize = 0;
 
-				println!("entering reading loop");
+				// overall counter of consumed bytes
+				//let mut consumed = length;
+				//let mut consumed = 0;
+
+				//println!("DEBUG: entering reading loop");
 				// this is the data reading loop. On each iteration we will read more data, then try to parse
 				// it in the inner loop
 				loop {
 					// refill the buffer
 					let sz = file.read(self.buf.space()).expect("should write");
 					self.buf.fill(sz);
+					/*
 					println!(
-						"refill: {} more bytes, available data: {} bytes, consumed: {} bytes",
+						"DEBUG: refill: {} more bytes, available data: {} bytes, consumed: {} bytes",
 						sz,
 						self.buf.available_data(),
 						consumed
 					);
+					*/
 
 					// if there's no more available data in the buffer after a write, that means we reached
 					// the end of the file
 					if self.buf.available_data() == 0 {
-						println!("no more data to read or parse, stopping the reading loop");
+						//println!("DEBUG: no more data to read or parse, stopping the reading loop");
 						break;
 					}
 
@@ -132,7 +132,7 @@ pub mod flowd {
 
 					// this is the parsing loop. After we read some data, we will try to parse from it until
 					// we get an error or the parser returns `Incomplete`, indicating it needs more data.
-					println!("entering parsing loop");
+					//println!("DEBUG: entering parsing loop");
 					loop {
 						let (length, frame) = {
 							//println!("[{}] data({} bytes, consumed {}):\n{}", tag_count,
@@ -171,7 +171,7 @@ pub mod flowd {
 									)
 								}
 								Err(nom::Err::Incomplete(n)) => {
-									println!("not enough data, needs a refill: {:?}", n);
+									//println!("DEBUG: not enough data, needs a refill: {:?}", n);
 
 									needed = Some(n);
 									break;
@@ -184,13 +184,15 @@ pub mod flowd {
 
 						//println!("{}", tag);
 
+						/*
 						println!(
-							"consuming {} of {} bytes",
+							"DEBUG: consuming {} of {} bytes",
 							length,
 							self.buf.available_data()
 						);
+						*/
 						self.buf.consume(length);
-						consumed += length;
+						//consumed += length;
 
 						// give the frame to the calling code. On the next call to the generator's `resume()`,
 						// we will continue from the parsing loop, and go on the reading loop's next iteration
@@ -230,8 +232,9 @@ pub mod flowd {
 								tag.1.to_hex(16)
 							);
 							*/
+							/*
 							println!(
-								"next frame:\n\tframe_type={}\n\tbody_type={}\n\tport={}\n\theaders:",
+								"DEBUG: next frame:\n\tframe_type={}\n\tbody_type={}\n\tport={}\n\theaders:",
 								String::from_utf8(frame.frame_type)
 									.expect("unvalid utf8 in frame type"),
 								String::from_utf8(frame.body_type)
@@ -251,9 +254,10 @@ pub mod flowd {
 								"\tbody={}",
 								String::from_utf8(frame.body).expect("unvalid utf8 in frame body")
 							);
+							*/
 						}
 						GeneratorState::Complete(tag_count) => {
-							println!("parsed {} framed IPs", tag_count);
+							//println!("DEBUG: parsed {} framed IPs", tag_count);
 							break;
 						}
 					}
