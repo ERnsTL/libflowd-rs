@@ -1,4 +1,4 @@
-#![feature(generators, generator_trait)]
+#![feature(generators, generator_trait, const_str_as_bytes)]
 #![feature(test)]
 extern crate test;
 
@@ -11,6 +11,7 @@ mod flowd {
 	use std::io::{BufRead, Error, Read};
 	use std::result::*;
 	use std::str;
+	use std::str::FromStr;
 
 	use std::fs::File;
 	use std::ops::{Generator, GeneratorState};
@@ -20,20 +21,20 @@ mod flowd {
 	use nom::types::{CompleteByteSlice, CompleteStr};
 	use nom::{alphanumeric, anychar, char, line_ending, newline};
 	use nom::{
-		AsBytes, AsChar, Err, FindToken, HexDisplay, InputLength, InputTakeAtPosition, Needed,
-		Offset,
+		AsBytes, AsChar, Err, FindSubstring, FindToken, HexDisplay, InputLength,
+		InputTakeAtPosition, Needed, Offset,
 	};
 
 	//mod types;
 
 	//use types::*;
 
-	pub struct IP2<'b> {
-		pub frame_type: &'b str,
-		pub body_type: &'b str,
-		pub port: &'b str,
-		pub headers: Vec<(String, String)>,
-		pub body: &'b [u8],
+	pub struct IP2 {
+		pub frame_type: Vec<u8>,
+		pub body_type: Vec<u8>,
+		pub port: Vec<u8>,
+		pub headers: Vec<(Vec<u8>, Vec<u8>)>,
+		pub body: Vec<u8>,
 	}
 
 	pub struct Parser {
@@ -101,8 +102,8 @@ mod flowd {
 
 			let mut generator = move || {
 				println!("entered generator");
-				// we will count the number of tag and use that and return value for the generator
-				let mut tag_count = 0usize;
+				// we will count the number of frames and use that and return value for the generator
+				let mut frame_count = 0usize;
 				//let mut consumed = length;
 				let mut consumed = 0;
 
@@ -130,10 +131,10 @@ mod flowd {
 					let needed: Option<Needed>;
 
 					// this is the parsing loop. After we read some data, we will try to parse from it until
-					// we get an error or the parser returns `Incomplete`, indicating it needs more data
+					// we get an error or the parser returns `Incomplete`, indicating it needs more data.
 					println!("entering parsing loop");
 					loop {
-						let (length, tag) = {
+						let (length, frame) = {
 							//println!("[{}] data({} bytes, consumed {}):\n{}", tag_count,
 							//  b.available_data(), consumed, (&b.data()[..min(b.available_data(), 128)]).to_hex(16));
 
@@ -147,9 +148,9 @@ mod flowd {
 							// try to parse a tag
 							// the `types::flv_tag` parser combines the tag parsing and consuming the 4 byte integer size
 							// following it
-							match frame_header(self.buf.data()) {
-								Ok((remaining, tag)) => {
-									tag_count += 1;
+							match frame_full(self.buf.data()) {
+								Ok((remaining, frame)) => {
+									frame_count += 1;
 
 									// tags parsed with flavors contain a slice of the original data. We cannot
 									// return that from the generator, since it is borrowed from the Buffer's internal
@@ -160,11 +161,13 @@ mod flowd {
 									//(self.buf.data().offset(remaining), t)
 									//TODO
 
-									//(self.buf.data().offset(remaining), tag)
+									//(self.buf.data().offset(remaining), frame)
+
+									// NOTE: for reason of cloning see https://stackoverflow.com/questions/35664419/how-do-i-duplicate-a-u8-slice
 									(
 										self.buf.data().offset(remaining),
 										//([97u8, 98u8, 99u8], [65u8, 66u8, 67u8]),
-										(tag.0.to_owned(), tag.1.to_owned()),
+										frame, //(tag.0.to_owned(), tag.1.to_owned()),
 									)
 								}
 								Err(nom::Err::Incomplete(n)) => {
@@ -179,7 +182,7 @@ mod flowd {
 							}
 						};
 
-						println!("{}", tag.1[0]);
+						//println!("{}", tag);
 
 						println!(
 							"consuming {} of {} bytes",
@@ -189,10 +192,10 @@ mod flowd {
 						self.buf.consume(length);
 						consumed += length;
 
-						// give the tag to the calling code. On the next call to the generator's `resume()`,
+						// give the frame to the calling code. On the next call to the generator's `resume()`,
 						// we will continue from the parsing loop, and go on the reading loop's next iteration
 						// if necessary
-						yield tag;
+						yield frame;
 					}
 
 					// if the parser returned `Incomplete`, and it needs more data than the buffer can hold,
@@ -212,28 +215,45 @@ mod flowd {
 					}
 				}
 
-				// we finished looping over the data, return how many tag we parsed
-				return tag_count;
+				// we finished looping over the data, return how many frames we parsed
+				return frame_count;
 			};
 
 			loop {
 				unsafe {
 					match generator.resume() {
-						GeneratorState::Yielded(tag) => {
+						GeneratorState::Yielded(frame) => {
 							/*
 							println!(
-								"next tag: type={:?}, timestamp={}, size={}",
-								tag.header.tag_type, tag.header.timestamp, tag.header.data_size
-							);
-							*/
-							println!(
-								"gor parser result: {} = {}",
+								"got parser result: {} = {}",
 								tag.0.to_hex(16),
 								tag.1.to_hex(16)
 							);
+							*/
+							println!(
+								"next frame:\n\tframe_type={}\n\tbody_type={}\n\tport={}\n\theaders:",
+								String::from_utf8(frame.frame_type)
+									.expect("unvalid utf8 in frame type"),
+								String::from_utf8(frame.body_type)
+									.expect("unvalid utf8 in body type"),
+								String::from_utf8(frame.port).expect("unvalid utf8 in port name"),
+							);
+							for header in frame.headers {
+								println!(
+									"\t\t{} = {}",
+									String::from_utf8(header.0)
+										.expect("unvalid utf8 in a header field name"),
+									String::from_utf8(header.1)
+										.expect("unvalid utf8 in a header value")
+								);
+							}
+							println!(
+								"\tbody={}",
+								String::from_utf8(frame.body).expect("unvalid utf8 in frame body")
+							);
 						}
 						GeneratorState::Complete(tag_count) => {
-							println!("parsed {} FLV tags", tag_count);
+							println!("parsed {} framed IPs", tag_count);
 							break;
 						}
 					}
@@ -261,10 +281,48 @@ mod flowd {
 	);
 	*/
 
-	named!(pub frame_header<(&[u8],&[u8])>,
-		terminated!(header_line, newline)
-		//do_parse!(header_line)
+	named!(
+		frame_full<IP2>,
+		do_parse!(
+			char!('2')
+				>> frame_type: terminated!(alphanumeric1_nonnewline, char!('\n'))
+				>> headers: many_till!(header_line, char!('\n'))
+				//>> headers: header_line
+				>> body: take!(body_get_length(&headers.0))
+				>> opt!(char!('\0'))	// finish byte for synchronization in frame stream	//TODO keep that optional?
+				>> (IP2 {
+					frame_type: frame_type.to_vec(),
+					//frame_type: "TODO".to_owned().into_bytes(),
+					body_type: "TODO".to_owned().into_bytes(),
+					port: "TODO".to_owned().into_bytes(),
+					headers: headers.0.to_owned(),
+					//headers: vec![headers.to_owned()],
+					//body: "TODO".to_owned().into_bytes(),
+					body: body.to_owned(),
+				}) //TODO final \0 byte
+		)
 	);
+
+	const length_bytes: &[u8] = "length".as_bytes();
+
+	//TODO make this function obsolete - extract that length already during a do_parse! block and return it up into the frame_full do_parse! block
+	fn body_get_length(headers: &Vec<(Vec<u8>, Vec<u8>)>) -> usize {
+		for header in headers {
+			if header.0 == length_bytes {
+				unsafe {
+					return usize::from_str(str::from_utf8_unchecked(&header.1)).unwrap();
+				}
+			}
+		}
+		0
+	}
+
+	/*
+	named!(
+		frame_header<(&[u8], &[u8])>,
+		terminated!(header_line, newline) //do_parse!(header_line)
+	);
+	*/
 
 	/*
 	named!(
@@ -279,12 +337,16 @@ mod flowd {
 	*/
 
 	named!(
-		header_line<(&[u8], &[u8])>,
+		header_line<(Vec<u8>, Vec<u8>)>,
 		do_parse!(
-			kv: separated_pair!(alphanumeric1_noncolon, char!(':'), alphanumeric1_nonnewline)
-				>> (kv)
+			kv: terminated!(
+				separated_pair!(alphanumeric1_noncolon, char!(':'), alphanumeric1_nonnewline),
+				char!('\n')
+			) >> ((kv.0.to_vec(), kv.1.to_vec()))
 		)
 	);
+
+	// TODO optimization? 	#[inline(always)]
 
 	/// Recognizes one or more numerical and alphabetic characters.
 	/// For ASCII strings: 0-9a-zA-Z
@@ -297,6 +359,7 @@ mod flowd {
 		input.split_at_position1(
 			|item| {
 				let c = item.as_char();
+				//println!("alphanumeric1_noncolon: got char {}", c);
 				c == ':'
 			},
 			nom::ErrorKind::AlphaNumeric,
@@ -314,6 +377,7 @@ mod flowd {
 		input.split_at_position1(
 			|item| {
 				let c = item.as_char();
+				//println!("alphanumeric1_nonewline: got char {}", c);
 				c == '\n'
 			},
 			nom::ErrorKind::Escaped,
