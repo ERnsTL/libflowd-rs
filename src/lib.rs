@@ -477,7 +477,7 @@ mod flowd {
 			}
 		}
 		// body, if length > 0
-		let mut body: Vec<u8> = Vec::with_capacity(body_length);
+		let mut body: Vec<u8> = vec![0u8; body_length]; // NOTE: does not work: Vec::with_capacity(body_length);
 		reader.read_exact(&mut body).expect("reading body");
 		// frame terminator byte
 		let mut terminator = [0u8; 1];
