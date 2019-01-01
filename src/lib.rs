@@ -689,15 +689,46 @@ pub mod flowd {
 mod tests {
 	use flowd;
 	use std::io;
+	use std::io::Read;
 
 	#[test]
-	fn nom_parser_parses() {
+	fn test_nom_parser_parses() {
+		// read whole test frame file
+		let mut file = std::fs::File::open("./testframe").expect("could not open testframe file");
+		let mut frame: String = String::new();
+		file.read_to_string(&mut frame)
+			.expect("could not read file into buffer");
+
+		// initialize parser
 		let mut p: flowd::Parser = flowd::Parser::new();
-		p.run("./testframe").expect("MASSIVE FAILURE");
+		let mut cursor = io::Cursor::new(frame);
+
+		// run it
+		p.run(&mut cursor).expect("MASSIVE FAILURE");
+	}
+
+	#[bench]
+	//#[allow(unused_variables)]
+	fn parse_v2_nom(b: &mut Bencher) {
+		// read whole test frame file
+		let mut file = std::fs::File::open("./testframe").expect("could not open testframe file");
+		let mut frame: String = String::new();
+		file.read_to_string(&mut frame)
+			.expect("could not read file into buffer");
+
+		// initialize parser
+		let mut p: flowd::Parser = flowd::Parser::new();
+		let mut cursor = io::Cursor::new(frame);
+
+		// run it
+		b.iter(|| {
+			cursor.set_position(0);
+			p.run(&mut cursor).expect("MASSIVE FAILURE");
+		})
 	}
 
 	#[test]
-	fn parse_frame_parses() {
+	fn test_parse_frame_parses() {
 		let frame_str_v2: String = format!(
 			"2{}\n{}\n{}\n{}\n{}\n\n{}\0",
 			"data", "type:TCPPacket", "port:IN", "conn-id:1", "length:2", "a\n"
@@ -715,7 +746,7 @@ mod tests {
 	}
 
 	#[test]
-	fn marshal_frame_marshals() {
+	fn test_marshal_frame_marshals() {
 		let frame = flowd::IP {
 			frame_type: "data".to_owned(),
 			body_type: "TCPPacket".to_owned(),
@@ -756,15 +787,6 @@ mod tests {
 		b.iter(|| {
 			cursor.set_position(0);
 			let ip = flowd::parse_frame(&mut cursor).unwrap();
-		})
-	}
-
-	#[bench]
-	//#[allow(unused_variables)]
-	fn parse_v2_nom(b: &mut Bencher) {
-		let mut p: flowd::Parser = flowd::Parser::new();
-		b.iter(|| {
-			p.run("./testframe").expect("MASSIVE FAILURE");
 		})
 	}
 
