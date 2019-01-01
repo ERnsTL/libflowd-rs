@@ -1,6 +1,6 @@
 # libflowd-rs
 
-Parse and marshal [libflowd v2 frames](https://github.com/ERnsTL/flowd), enabling the creation of ```flowd``` components in Rust.
+Parse and marshal [libflowd v2 frames](https://github.com/ERnsTL/flowd), enabling the creation of components for the ```flowd``` FBP (Flow-Based Programming) inter-language runtime using the Rust programming language.
 
 
 ## Optimization Potentials
