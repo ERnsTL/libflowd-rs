@@ -424,7 +424,7 @@ mod flowd {
 
 	const VERSION_TWO: u8 = 0x32; // "2"
 	#[allow(dead_code)]
-	pub fn parse_frame<T>(mut reader: T) -> Result<IP, Error>
+	pub fn parse_frame<T>(reader: &mut T) -> Result<IP, Error>
 	where
 		T: BufRead,
 	{
@@ -459,8 +459,8 @@ mod flowd {
 			// split line
 			let line_parts: Vec<&str> = line.splitn(2, ':').collect();
 			if line_parts.len() != 2 {
-				Some(Error::new(
-					ErrorKind::Other,
+				return Err(Error::new(
+					ErrorKind::InvalidInput,
 					"header line contains no colon",
 				));
 			}
@@ -470,7 +470,8 @@ mod flowd {
 			} else if line_parts[0] == "type" {
 				body_type = line_parts[1].to_string();
 			} else if line_parts[0] == "length" {
-				body_length = line_parts[1].parse().expect("parsing body length");
+				// TODO optimize
+				body_length = usize::from_str(&line_parts[1]).expect("parsing body length");
 			} else {
 				// add to headers
 				header.push(Header(line_parts[0].to_string(), line_parts[1].to_string()));
@@ -480,13 +481,13 @@ mod flowd {
 		let mut body: Vec<u8> = vec![0u8; body_length]; // NOTE: does not work: Vec::with_capacity(body_length);
 		reader.read_exact(&mut body).expect("reading body");
 		// frame terminator byte
-		let mut terminator = [0u8; 1];
+		let mut terminator = [0u8; 1]; //TODO optimize this could be reused
 		reader
 			.read(&mut terminator)
 			.expect("reading frame terminator");
 		if terminator[0] != 0 {
 			Some(Error::new(
-				ErrorKind::Other,
+				ErrorKind::InvalidData,
 				"frame terminator is no null byte",
 			));
 		}
@@ -643,8 +644,8 @@ mod tests {
 			"2{}\n{}\n{}\n{}\n{}\n\n{}\0",
 			"data", "type:TCPPacket", "port:IN", "conn-id:1", "length:2", "a\n"
 		);
-		let cursor = io::Cursor::new(frame_str_v2);
-		let ip = flowd::parse_frame(cursor);
+		let mut cursor = io::Cursor::new(frame_str_v2);
+		let ip = flowd::parse_frame(&mut cursor);
 		let ip = ip.expect("unpacking parse result");
 		assert_eq!(ip.frame_type, "data");
 		assert_eq!(ip.body_type, "TCPPacket");
@@ -693,6 +694,7 @@ mod tests {
 			"2{}\n{}\n{}\n{}\n{}\n\n{}\0",
 			"data", "type:TCPPacket", "port:IN", "conn-id:1", "length:2", "a\n"
 		);
+		let mut cursor = io::Cursor::new(&frame_str_v2);
 		b.iter(|| {
 			cursor.set_position(0);
 			let ip = flowd::parse_frame(&mut cursor).unwrap();
