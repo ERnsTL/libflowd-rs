@@ -56,8 +56,14 @@ pub mod flowd {
 
 		//impl<'a, T: Read> Iterator for Parser<'a, T> {
 		// NOTE: ^ is difficult because of half-baked Dynamically Sized Types (DST) support (2018-12)
-		pub fn run(self: &mut Parser, filename: &str) -> std::io::Result<()> {
-			let mut file = File::open(filename)?;
+		//pub fn run(self: &mut Parser, filename: &str) -> std::io::Result<()> {
+		//	let mut file = File::open(filename)?;
+
+		pub fn run<T>(self: &mut Parser, file: &mut T) -> std::io::Result<()>
+		where
+			T: BufRead,
+		{
+			//let mut file = File::open(filename)?;
 
 			// we write into the `&mut[u8]` returned by `space()`
 			let sz = file.read(self.buf.space()).expect("should write");
