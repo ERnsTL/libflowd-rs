@@ -8,7 +8,7 @@ extern crate nom;
 extern crate circular;
 
 mod flowd {
-	use std::io::{BufRead, Error, Read};
+	use std::io::{BufRead, Error, ErrorKind, Read};
 	use std::result::*;
 	use std::str;
 	use std::str::FromStr;
@@ -510,78 +510,110 @@ mod flowd {
 		pub body: Vec<u8>,
 	}
 
-	use std::io::ErrorKind;
+	const NULL_BYTE: &[u8] = &[0x00];
+	const NEWLINE: &[u8] = &[b'\n'];
+	const BODY_TYPE: &[u8] = "type:".as_bytes();
+	const PORT: &[u8] = "port:".as_bytes();
+	const LENGTH: &[u8] = "length:".as_bytes();
+	const COLON: &[u8] = &[b':'];
+	const VERSION_TWO_BUF: &[u8] = &[b'2'];
+
 	use std::io::Write;
 	impl IP {
 		#[allow(dead_code)]
 		//TODO further optimizations using BufWrite @ https://github.com/Kixunil/genio
 		// NOTE: use BufWriter to wrap STDOUT, otherwise 1 syscall per byte written
-		pub fn marshal<T>(&self, mut writer: T) -> Option<Error>
+		pub fn marshal<T>(&self, mut writer: T) -> std::io::Result<()>
 		where
 			T: Write,
 		{
 			// version marker
-			match writer.write(&[b'2']) {
-				Err(e) => return Some(e),
-				_ => (),
-			};
+			writer.write(VERSION_TWO_BUF)?;
 			// frame type
-			if self.frame_type == "" {
-				return Some(Error::new(ErrorKind::Other, "frame_type emtpy"));
+			if self.frame_type.is_empty() {
+				return Err(Error::new(ErrorKind::Other, "frame_type emtpy"));
 			}
-			match write!(&mut writer, "{}\n", self.frame_type) {
-				Err(e) => return Some(e),
-				_ => (),
-			};
+			writer.write(self.frame_type.as_bytes())?;
+			writer
+				.write(NEWLINE)
+				.expect("writing newline after frame type");
 			// body type, if present
 			if self.body_type != "" {
+				/*
 				match write!(&mut writer, "type:{}\n", self.body_type) {
 					Err(e) => return Some(e),
 					_ => (),
 				};
+				*/
+				writer
+					.write(BODY_TYPE)
+					.expect("writing body type field name");
+				writer
+					.write(self.body_type.as_bytes())
+					.expect("writing body type value");
+				writer
+					.write(NEWLINE)
+					.expect("writing newline after body type");
 			}
 			// port, if present
 			if self.port != "" {
+				/*
 				match write!(&mut writer, "port:{}\n", self.port) {
 					Err(e) => return Some(e),
 					_ => (),
 				};
+				*/
+				writer.write(PORT).expect("writing port field name");
+				writer
+					.write(self.port.as_bytes())
+					.expect("writing port value");
+				writer.write(NEWLINE).expect("writing newline after port");
 			}
 			// other header fields, if present
 			if !self.headers.is_empty() {
-				for header in self.headers.iter() {
+				for i in 0..self.headers.len() {
+					//for header in self.headers.iter() {
+					/*
 					match write!(&mut writer, "{}:{}\n", header.0, header.1) {
 						Err(e) => return Some(e),
 						_ => (),
 					};
+					*/
+					writer
+						.write(self.headers[i].0.as_bytes())
+						.expect("writing a header field name");
+					writer.write(COLON).expect("writing a header colon");
+					writer
+						.write(self.headers[i].1.as_bytes())
+						.expect("writing a header field value");
+					writer
+						.write(NEWLINE)
+						.expect("writing a header field newline");
 				}
 			}
 			// is body present?
 			if !self.body.is_empty() {
 				// body length and end-of-header marker = empty line
+				writer.write(LENGTH).expect("writing length field name");
+				writer
+					.write(self.body.len().to_string().as_bytes())
+					.expect("writing body length value");
+				/*
 				match write!(&mut writer, "length:{}\n\n", self.body.len()) {
 					Err(e) => return Some(e),
 					_ => (),
 				};
+				*/
 				// body
-				match writer.write(&self.body) {
-					Err(e) => return Some(e),
-					_ => (),
-				};
+				writer.write(&self.body)?;
 			} else {
 				// end-of-header marker
-				match writer.write(&[b'\n']) {
-					Err(e) => return Some(e),
-					_ => (),
-				};
+				writer.write(NEWLINE)?;
 			}
 			// frame terminator = null byte
-			match writer.write(&[0x00]) {
-				Err(e) => return Some(e),
-				_ => (),
-			};
+			writer.write(NULL_BYTE)?;
 			// success
-			None
+			Ok(())
 		}
 	}
 }
@@ -634,7 +666,7 @@ mod tests {
 		};
 		let mut buffer: Vec<u8> = vec![];
 		match frame.marshal(&mut buffer) {
-			Some(e) => panic!(e),
+			Err(e) => panic!(e),
 			_ => (),
 		};
 		let marshaled_str: String =
